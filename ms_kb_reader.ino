@@ -1,12 +1,11 @@
 #include <EEPROM.h>
 #include <SPI.h>
-#include "mhid.h"
 #include "nRF24L01.h"
 #include "RF24.h"
 
 #define DEBUG
-#define RADIO_PIN_CE 9
-#define RADIO_PIN_CSN 10
+#define NRF24L01_RADIO_PIN_CE 9
+#define NRF24L01_RADIO_PIN_CSN 10
 #define LCD_PIN_SCE   7 //Pin 3 on LCD
 #define LCD_PIN_RESET 6 //Pin 4 on LCD
 #define LCD_PIN_DC    5 //Pin 5 on LCD
@@ -16,8 +15,8 @@
 #define LCD_DATA  1
 #define LCD_X     84
 #define LCD_Y     48
-#define LCD_CHARACTER_WIDTH	7 // Includes 1 line padding
-#define LCD_CHARACTER_HEIGHT	8
+#define LCD_CHARACTER_WIDTH 7 // Includes 1 line padding
+#define LCD_CHARACTER_HEIGHT    8
 #define SERIAL_BAUDRATE 115200
 #define EEPROM_LAST_CHANNEL_VALUE_ADDRESS  0x05 
 #define RADIO_PACKET_SIZE 16
@@ -127,23 +126,141 @@ static const byte ASCII[][5] = {
   ,{0x78, 0x46, 0x41, 0x46, 0x78} // 7f DEL
 };
 
+uint8_t HID_basic[][2] = {
+   /*0x00=>*/{'_','_'},
+   /*0x01=>*/{'_','_'},
+   /*0x02=>*/{'_','_'},
+   /*0x03=>*/{'_','_'},
+   /*0x04=>*/{'a','A'},
+   /*0x05=>*/{'b','B'},
+   /*0x06=>*/{'c','C'},
+   /*0x07=>*/{'d','D'},
+   /*0x08=>*/{'e','E'},
+   /*0x09=>*/{'f','F'},
+   /*0x0A=>*/{'g','G'},
+   /*0x0B=>*/{'h','H'},
+   /*0x0C=>*/{'i','I'},
+   /*0x0D=>*/{'j','J'},
+   /*0x0E=>*/{'k','K'},
+   /*0x0F=>*/{'l','L'},
+   /*0x10=>*/{'m','M'},
+   /*0x11=>*/{'n','N'},
+   /*0x12=>*/{'o','O'},
+   /*0x13=>*/{'p','P'},
+   /*0x14=>*/{'q','Q'},
+   /*0x15=>*/{'r','R'},
+   /*0x16=>*/{'s','S'},
+   /*0x17=>*/{'t','T'},
+   /*0x18=>*/{'u','U'},
+   /*0x19=>*/{'v','V'},
+   /*0x1A=>*/{'w','W'},
+   /*0x1B=>*/{'x','X'},
+   /*0x1C=>*/{'y','Y'},
+   /*0x1D=>*/{'z','Z'},
+   /*0x1E=>*/{'1','!'},
+   /*0x1F=>*/{'2','@'},
+   /*0x20=>*/{'3','#'},
+   /*0x21=>*/{'4','$'},
+   /*0x22=>*/{'5','%'},
+   /*0x23=>*/{'6','^'},
+   /*0x24=>*/{'7','&'},
+   /*0x25=>*/{'8','*'},
+   /*0x26=>*/{'9','('},
+   /*0x27=>*/{'0',')'},
+   /*0x28=>*/{'\n','\n'},
+   /*0x29=>*/{'_','_'},
+   /*0x2A=>*/{0x08,0x08},
+   /*0x2B=>*/{'\t','\t'},
+   /*0x2C=>*/{' ',' '},
+   /*0x2D=>*/{'-','_'},
+   /*0x2E=>*/{'=','+'},
+   /*0x2F=>*/{'[','{'},
+   /*0x30=>*/{'}','}'},
+   /*0x31=>*/{'\\','|'},
+   /*0x32=>*/{'_','_'},
+   /*0x33=>*/{';',':'},
+   /*0x34=>*/{'\'','\''}, // Original - /*0x34=>*/{'\'','\"'},
+   /*0x35=>*/{'`','~'},
+   /*0x36=>*/{',','<'},
+   /*0x37=>*/{'.','>'},
+   /*0x38=>*/{'/','?'}, 
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+   /*0x39=>*/{'_','_'},
+             {0,0}
+};
+
 volatile char mode = MODE_INTRODUCTION;
 
-uint8_t channel = 72; 
+uint8_t nrf24l01_channel = 72; 
 uint64_t keyboard_mac_address = 0;
-RF24 radio(RADIO_PIN_CE, RADIO_PIN_CSN);
-uint16_t total_packets_received_count = 0;
-uint16_t total_characters_received_count = 0;
+RF24 nrf24l01_radio(NRF24L01_RADIO_PIN_CE, NRF24L01_RADIO_PIN_CSN);
+uint16_t nrf24l01_total_packets_received = 0;
+uint16_t nrf24l01_total_characters_received = 0;
+uint16_t nrf24l01_last_packet_sequence = 0;
+uint16_t nrf24l01_last_letter_received = 0;
+boolean nrf24l01_last_keytroke_was_on_single_line = false;
 
 char lcd_display_character_buffer[6][12];
 uint8_t lcd_display_character_buffer_current_line = 1;
 uint8_t lcd_display_character_buffer_character_position = 1;
 
-uint16_t radio_packet_last_sequence = 0;
-uint16_t radio_last_letter_received = 0;
-boolean radio_last_keytroke_was_on_single_line = false;
+uint8_t decode_hid_data(uint8_t hid, uint8_t meta)
+{
+   if(hid >= sizeof(HID_basic)/2)
+      return('_');
 
-void decrypt_packet(uint8_t* p)
+   /* return ASCII char - if the shift metakey is also pressed, there is one bit set in the metakey info byte. */
+   meta &= 0x22;
+   return(HID_basic[hid][(meta>>5)||(meta>>1)]);
+}
+
+void nrf24l01_decrypt_packet(uint8_t* p)
 {
   for (int i = 4; i < 15; i++)
   {
@@ -151,16 +268,14 @@ void decrypt_packet(uint8_t* p)
   }
 }
 
-void process_packet(uint8_t* packet)
+void nrf24l01_process_packet(uint8_t* packet)
 {
-  total_packets_received_count++;
+  nrf24l01_total_packets_received++;
   if(mode == MODE_STATUS)
   {
     lcd_go_to_x_y(49,3);
-	String packets_received_string = String(total_packets_received_count);
-	char packets_received_char_buffer[packets_received_string.length()];
-	packets_received_string.toCharArray(packets_received_char_buffer, packets_received_string.length());
-	lcd_string(packets_received_char_buffer);
+    String packets_received_string = String(nrf24l01_total_packets_received);
+    lcd_print_string(packets_received_string);
   }
   
   if(packet[0] != 0x0A) return; 
@@ -168,7 +283,7 @@ void process_packet(uint8_t* packet)
   if(packet[1] != 0x78) return;
   
   uint16_t sequence = (packet[5] << 8) + packet[4];
-  if (sequence == radio_packet_last_sequence) return;
+  if (sequence == nrf24l01_last_packet_sequence) return;
   
   bool position_one_contains_valid_letter = false;
   bool position_two_contains_valid_letter = false;
@@ -182,19 +297,19 @@ void process_packet(uint8_t* packet)
   uint16_t current_letter_position_three = (current_meta_value << 8) + current_key_position_three;
   boolean current_key_is_on_single_line = current_key_position_two == 0 && current_key_position_three == 0;
   
-  if(current_key_position_three != 0 && current_letter_position_three != radio_last_letter_received)
+  if(current_key_position_three != 0 && current_letter_position_three != nrf24l01_last_letter_received)
   {
     position_three_contains_valid_letter = true;
   }
   
-  if(current_key_position_two != 0 && current_letter_position_two != radio_last_letter_received)
+  if(current_key_position_two != 0 && current_letter_position_two != nrf24l01_last_letter_received)
   {
     position_two_contains_valid_letter = true;
   }
   
   if(current_key_position_two == 0 || position_two_contains_valid_letter == true) // only pay attention if the character ahead in position two was not ignored
   {
-    if(current_letter_position_one != radio_last_letter_received || (radio_last_keytroke_was_on_single_line == true && current_key_is_on_single_line == true))
+    if(current_letter_position_one != nrf24l01_last_letter_received || (nrf24l01_last_keytroke_was_on_single_line == true && current_key_is_on_single_line == true))
     {
       position_one_contains_valid_letter = true;
     }
@@ -204,24 +319,22 @@ void process_packet(uint8_t* packet)
   if(position_two_contains_valid_letter == true) process_letter(current_meta_value, current_key_position_two);
   if(position_three_contains_valid_letter == true) process_letter(current_meta_value, current_key_position_three);
   
-  radio_last_keytroke_was_on_single_line = current_key_is_on_single_line;
-  radio_packet_last_sequence = sequence;
+  nrf24l01_last_keytroke_was_on_single_line = current_key_is_on_single_line;
+  nrf24l01_last_packet_sequence = sequence;
 }
 
 void process_letter(char meta_value, char key)
 {
-  total_characters_received_count++;
+  nrf24l01_total_characters_received++;
   if(mode == MODE_STATUS)
   {
     lcd_go_to_x_y(49,2);
-	String characters_received_string = String(total_characters_received_count);
-	char characters_received_char_buffer[characters_received_string.length()];
-	characters_received_string.toCharArray(characters_received_char_buffer, characters_received_string.length());
-	lcd_string(characters_received_char_buffer);
+    String characters_received_string = String(nrf24l01_total_characters_received);
+    lcd_print_string(characters_received_string);
   }
   
-  char letter = hid_decode(key, meta_value);
-  radio_last_letter_received = (meta_value << 8) + key;
+  char letter = decode_hid_data(key, meta_value);
+  nrf24l01_last_letter_received = (meta_value << 8) + key;
   
   #ifdef DEBUG
   Serial.print(letter);
@@ -232,155 +345,152 @@ void process_letter(char meta_value, char key)
   
   if(lcd_display_character_buffer_character_position == sizeof(lcd_display_character_buffer[0]))
   {
-	if(lcd_display_character_buffer_current_line == sizeof(lcd_display_character_buffer))
-	{
-	  for(int i=0; i < sizeof(lcd_display_character_buffer) - 1; i++) strcpy(lcd_display_character_buffer[i], lcd_display_character_buffer[i + 1]); 
-	  strcpy(lcd_display_character_buffer[sizeof(lcd_display_character_buffer) - 1], "            ");
-	  redraw_all_buffered_characters_to_screen();
-	}
-	else
-	{
-	  lcd_display_character_buffer_current_line++;
-	}
-	
-	lcd_display_character_buffer_character_position = 1;
+    if(lcd_display_character_buffer_current_line == sizeof(lcd_display_character_buffer))
+    {
+      for(int i=0; i < sizeof(lcd_display_character_buffer) - 1; i++) strcpy(lcd_display_character_buffer[i], lcd_display_character_buffer[i + 1]); 
+      strcpy(lcd_display_character_buffer[sizeof(lcd_display_character_buffer) - 1], "            ");
+      redraw_all_buffered_characters_to_screen();
+    }
+    else
+    {
+      lcd_display_character_buffer_current_line++;
+    }
+    
+    lcd_display_character_buffer_character_position = 1;
   }
   
   lcd_display_character_buffer[lcd_display_character_buffer_current_line - 1][lcd_display_character_buffer_character_position - 1] = letter;
   if(mode == MODE_READING)
   {
     lcd_go_to_x_y((lcd_display_character_buffer_character_position - 1) * LCD_CHARACTER_WIDTH, lcd_display_character_buffer_current_line - 1);
-    lcd_character(letter);
+    lcd_print_character(letter);
   }
   lcd_display_character_buffer_character_position++;
 }
 
 void display_scanning_channel_on_lcd()
 {
-  lcd_clear();
-  lcd_go_to_x_y(13, 1);
-  lcd_string("Scanning");
+  lcd_clear_screen();
+  lcd_go_to_x_y(14, 1);
+  lcd_print_characters(F("Scanning"));
   lcd_go_to_x_y(17, 2);
-  lcd_string("channel");
+  lcd_print_characters(F("channel"));
   lcd_go_to_x_y(28, 3);
-  lcd_string("24");
+  lcd_print_characters(F("24"));
 }
 
 void display_update_scanning_channel_on_lcd(uint8_t channel)
 {
-  lcd_go_to_x_y(0, 1);
-  char channel_text[4];
-  String(channel).toCharArray(channel_text, 4);
-  lcd_string(channel_text);
+  lcd_go_to_x_y(42, 3);
+  lcd_print_string(String(nrf24l01_channel));
 }
 
-void display_status_static_text()
+void display_setup_status_screen_static_text()
 {
-  lcd_clear();
-  lcd_go_to_x_y(0, 1);
-  lcd_string("0x");
-  char hex_value[1];
+  lcd_clear_screen();
+  lcd_print_characters(F("0x"));
+  uint8_t mac_address_position = 84;
   for(int i = 0; i < 5; i++)
   {
-    uint8_t address_value = keyboard_mac_address >> 8;
-    String(address_value, HEX).toCharArray(hex_value, 1);
-    lcd_string(hex_value);
+    mac_address_position = mac_address_position - 14;  
+    lcd_go_to_x_y(mac_address_position, 1);
+    uint8_t partial_address_value = keyboard_mac_address >> (i * 8);
+    lcd_print_string(String(partial_address_value, HEX));
   }
-  lcd_go_to_x_y(21, 2);
-  lcd_string("CH:");
-  lcd_go_to_x_y(49, 2);
-  char channel_text[4];
-  String(channel).toCharArray(channel_text, 4);
-  lcd_string(channel_text);
+  lcd_go_to_x_y(7, 2);
+  lcd_print_characters(F("CHAN: 24"));
+  lcd_go_to_x_y(63, 2);
+  lcd_print_string(String(nrf24l01_channel));
   lcd_go_to_x_y(14, 3);
-  lcd_string("PKT:");
+  lcd_print_characters(F("PKT:"));
   lcd_go_to_x_y(7, 4);
-  lcd_string("CHAR	:");
+  lcd_print_characters(F("CHAR:"));
 }
 
 void redraw_all_buffered_characters_to_screen()
 {
-  	for(int row = 0; row < sizeof(lcd_display_character_buffer); row++)
-	{
+	lcd_clear_screen();
+    for(int row = 0; row < sizeof(lcd_display_character_buffer); row++)
+    {
       for(int column = 0; column < sizeof(lcd_display_character_buffer[0]); column++)
-	  {
-		char letter = lcd_display_character_buffer[row][column];
-		lcd_go_to_x_y(column * LCD_CHARACTER_WIDTH, row);
-        lcd_character(letter);
-	  }
-	}
+      {
+        char letter = lcd_display_character_buffer[row][column];
+        lcd_go_to_x_y(column * LCD_CHARACTER_WIDTH, row);
+        lcd_print_character(letter);
+      }
+    }
 }
 
-uint8_t flush_rx(void)
+uint8_t nrf24l01_flush_rx(void)
 {
   uint8_t status;
-  digitalWrite(RADIO_PIN_CSN, LOW);
+  digitalWrite(NRF24L01_RADIO_PIN_CSN, LOW);
   status = SPI.transfer( FLUSH_RX );
-  digitalWrite(RADIO_PIN_CSN, HIGH);
+  digitalWrite(NRF24L01_RADIO_PIN_CSN, HIGH);
   return status;
 }
 
-uint8_t write_to_nrf24l01_register(uint8_t reg, uint8_t value)                                       
+uint8_t nrf24l01_write_to_register(uint8_t reg, uint8_t value)                                       
 {
   uint8_t status;
-  digitalWrite(RADIO_PIN_CSN, LOW);
+  digitalWrite(NRF24L01_RADIO_PIN_CSN, LOW);
   status = SPI.transfer( W_REGISTER | ( REGISTER_MASK & reg ) );
   SPI.transfer(value);
-  digitalWrite(RADIO_PIN_CSN, HIGH);
+  digitalWrite(NRF24L01_RADIO_PIN_CSN, HIGH);
   return status;
 }
 
-void debug_print_packet(uint8_t* packet)
+void debug_nrf24l01_print_packet_to_serial(uint8_t* packet)
 {
   Serial.println("");
   Serial.print(millis());
-  Serial.print(" | ");
+  Serial.print(F(" | "));
   for (int j = 0; j < RADIO_PACKET_SIZE; j++)
   {
-    Serial.print(" ");
+    Serial.print(F(" "));
     if(packet[j] <= 0xF) Serial.print(" ");
     Serial.print(packet[j], HEX);
-    Serial.print(" |");
+    Serial.print(F(" |"));
   }
 }
 
-void scan()
+void scan_for_keyboards()
 {
   mode = MODE_SCANNING;
   keyboard_mac_address = 0xAALL;
   uint8_t packet[RADIO_PACKET_SIZE];
-  write_to_nrf24l01_register(0x02, 0x00);  // RF24 doesn't ever fully set this -- only certain bits of it
-  write_to_nrf24l01_register(0x03, 0x00); // SETUP_AW - change address width to be 2 bytes [Page 54]
-  radio.openReadingPipe(0, keyboard_mac_address);
-  radio.disableCRC();
-  radio.startListening();
+  nrf24l01_write_to_register(0x02, 0x00);  // RF24 doesn't ever fully set this -- only certain bits of it
+  nrf24l01_write_to_register(0x03, 0x00); // SETUP_AW - change address width to be 2 bytes [Page 54]
+  nrf24l01_radio.openReadingPipe(0, keyboard_mac_address);
+  nrf24l01_radio.disableCRC();
+  nrf24l01_radio.startListening();
   unsigned long channel_start_scan_time;
   display_scanning_channel_on_lcd();
   
   while (1)
   {
-    if (channel > 80)
-      channel = 3;
+    if (nrf24l01_channel > 80)
+      nrf24l01_channel = 3;
     #ifdef DEBUG
     Serial.println("");
-    Serial.print("Scanning channel ");
-    Serial.print(2400 + channel);
-    Serial.print(".");
-	#endif
-    radio.setChannel(channel);
-    display_update_scanning_channel_on_lcd(channel);
-	
+    Serial.print(F("Scanning channel "));
+    Serial.print(2400 + nrf24l01_channel);
+    Serial.print(F("."));
+    #endif
+    nrf24l01_radio.setChannel(nrf24l01_channel);
+    display_update_scanning_channel_on_lcd(nrf24l01_channel);
+    
     channel_start_scan_time = millis();
     while (millis() - channel_start_scan_time < 1000)
     {      
-      if(radio.available())
+      if(nrf24l01_radio.available())
       {
-        radio.read(&packet, RADIO_PACKET_SIZE);
+        nrf24l01_radio.read(&packet, RADIO_PACKET_SIZE);
         
         if (packet[4] == 0xCD)
         {
-		  #ifdef DEBUG
-          debug_print_packet(packet);
+          #ifdef DEBUG
+          debug_nrf24l01_print_packet_to_serial(packet);
           #endif
           // The data returned starts with the packet control field (PCF) which is 9 bits long [Page 25].
           // So our packet begins 9 bits in after the 5 byte mac. 
@@ -391,13 +501,13 @@ void scan()
             // Check if the packet type is 0x78 which is a keystroke or 0x38 which is idle (key is held down). 
             if (packet[7] << 1 == 0x38 || packet[7] << 1 == 0x78) 
             {
-			  #ifdef DEBUG
+              #ifdef DEBUG
               Serial.println("");
-              Serial.print("Keyboard on channel ");
-              Serial.print(channel);
-              Serial.print(".");
-			  #endif
-              EEPROM.write(EEPROM_LAST_CHANNEL_VALUE_ADDRESS, channel);
+              Serial.print(F("Keyboard on channel "));
+              Serial.print(nrf24l01_channel);
+              Serial.print(F("."));
+              #endif
+              EEPROM.write(EEPROM_LAST_CHANNEL_VALUE_ADDRESS, nrf24l01_channel);
 
               keyboard_mac_address = 0;
               for (int i = 0; i < 4; i++)
@@ -407,138 +517,173 @@ void scan()
               }
               keyboard_mac_address += packet[4]; // We know the first byte is 0xCD (Note: addressing is LSB first).
               #ifdef DEBUG
-			  Serial.print(" (Mac Address: ");
+              Serial.print(F(" (Mac Address: "));
               Serial.print(packet[0], HEX);
               Serial.print(packet[1], HEX);
               Serial.print(packet[2], HEX);
               Serial.print(packet[3], HEX);
               Serial.print(packet[4], HEX);
-              Serial.print(")");
-			  #endif
-              write_to_nrf24l01_register(0x03, 0x03);  // SETUP_AW - change address width back to be 5 bytes [Page 54]
+              Serial.print(F(")"));
+              #endif
+              nrf24l01_write_to_register(0x03, 0x03);  // SETUP_AW - change address width back to be 5 bytes [Page 54]
               return;
             }
           }
         }
       }
     }
-    channel++;
+    nrf24l01_channel++;
   }
 }
 
-void initialize_radio_and_lcd()
+void nrf24l01_initialize()
 {
-  lcd_init();
-  Serial.begin(SERIAL_BAUDRATE);
-  radio.begin();
-  channel = EEPROM.read(EEPROM_LAST_CHANNEL_VALUE_ADDRESS);
-  radio.setAutoAck(false);
-  radio.setPALevel(RF24_PA_MIN); 
-  radio.setDataRate(RF24_2MBPS);
-  radio.setPayloadSize(32);
-  radio.setChannel(channel);
+  nrf24l01_radio.begin();
+  nrf24l01_channel = EEPROM.read(EEPROM_LAST_CHANNEL_VALUE_ADDRESS);
+  nrf24l01_radio.setAutoAck(false);
+  nrf24l01_radio.setPALevel(RF24_PA_MIN); 
+  nrf24l01_radio.setDataRate(RF24_2MBPS);
+  nrf24l01_radio.setPayloadSize(32);
+  nrf24l01_radio.setChannel(nrf24l01_channel);
 }
 
-void setup_radio_for_reading()
+void nrf24l01_setup_for_reading_keyboard()
 {
+  nrf24l01_radio.stopListening();
   mode = MODE_READING;
-  radio.enableDynamicPayloads();
-  radio.setCRCLength(RF24_CRC_16);
-  radio.stopListening();
-  radio.openReadingPipe(1, keyboard_mac_address);
-  radio.startListening();
+  nrf24l01_radio.enableDynamicPayloads();
+  nrf24l01_radio.setCRCLength(RF24_CRC_16);
+  nrf24l01_radio.openReadingPipe(1, keyboard_mac_address);
+  nrf24l01_radio.startListening();
 }
 
 void display_introduction_on_lcd()
 {
   mode = MODE_INTRODUCTION;
+  unsigned int startMillis = millis();
+  while(((millis() - startMillis) <= 3000) && mode == MODE_INTRODUCTION) 
+  {
+    lcd_go_to_x_y(0, 0);
+    lcd_print_characters(F("MS KB READER"));
+    lcd_go_to_x_y(35, 2);
+    lcd_print_characters(F("by"));
+    lcd_go_to_x_y(21, 3);
+    lcd_print_characters(F("Darko,"));
+    lcd_go_to_x_y(3, 4);
+    lcd_print_characters(F("Gabriella &"));
+    lcd_go_to_x_y(10, 5);
+    lcd_print_characters(F("Charlotte"));
+  }
 }
 
 void setup()
 {
-  initialize_radio_and_lcd();
-  attachInterrupt(1, mode_button_pressed, FALLING);
+  Serial.begin(SERIAL_BAUDRATE);
+  lcd_inititialize();
+  nrf24l01_initialize();
+  //attachInterrupt(1, mode_button_pressed_isr, FALLING);
   display_introduction_on_lcd();
-  scan();
-  setup_radio_for_reading();
+  scan_for_keyboards();
+  nrf24l01_setup_for_reading_keyboard();
 }
 
-void mode_button_pressed()
+void mode_button_pressed_isr()
 {
   if(mode == MODE_READING)
   {
     mode = MODE_STATUS;
-	display_status_static_text();
+    display_setup_status_screen_static_text();
   }
   else if(mode == MODE_STATUS)
   {
     mode = MODE_READING;
-	redraw_all_buffered_characters_to_screen();
+    redraw_all_buffered_characters_to_screen();
+  }
+  else if(mode == MODE_INTRODUCTION)
+  {
+    mode = MODE_SCANNING;
   }
 }
 
 void loop(void)
 {
   uint8_t pipe_num;
-
-  if (radio.available(&pipe_num))
+  if (nrf24l01_radio.available(&pipe_num))
   {
     uint8_t current_packet[RADIO_PACKET_SIZE];
-    uint8_t payload_size = radio.getDynamicPayloadSize();
-    radio.read(&current_packet, RADIO_PACKET_SIZE);
-    flush_rx();
-    
-    decrypt_packet(current_packet);
-	#ifdef DEBUG
-    debug_print_packet(current_packet);
-	#endif
-    process_packet(current_packet);
+    uint8_t payload_size = nrf24l01_radio.getDynamicPayloadSize();
+    nrf24l01_radio.read(&current_packet, RADIO_PACKET_SIZE);
+    nrf24l01_flush_rx();
+    nrf24l01_decrypt_packet(current_packet);
+    #ifdef DEBUG
+    debug_nrf24l01_print_packet_to_serial(current_packet);
+    #endif
+    nrf24l01_process_packet(current_packet);
   }
 }
 
 void lcd_go_to_x_y(int x, int y) {
-  lcd_write(0, 0x80 | x);  // Column.
-  lcd_write(0, 0x40 | y);  // Row.  ?
+  lcd_send_data(0, 0x80 | x);  // Column.
+  lcd_send_data(0, 0x40 | y);  // Row.  ?
 }
 
 //This takes a large array of bits and sends them to the LCD
 void lcd_bitmap(char my_array[]){
   for (int index = 0 ; index < (LCD_X * LCD_Y / 8) ; index++)
-    lcd_write(LCD_DATA, my_array[index]);
+    lcd_send_data(LCD_DATA, my_array[index]);
 }
 
 //This function takes in a character, looks it up in the font table/array
 //And writes it to the screen
 //Each character is 8 bits tall and 5 bits wide. We pad one blank column of
 //pixels on each side of the character for readability.
-void lcd_character(char character) {
-  if(character < 0x20) character = 0x3f;
+void lcd_print_character(char character) {
+  if(character < 0x20 || character > 0x7f) character = 0x3f;
   
-  lcd_write(LCD_DATA, 0x00); //Blank vertical line padding
+  lcd_send_data(LCD_DATA, 0x00); //Blank vertical line padding
 
   for (int index = 0 ; index < 5 ; index++)
-    lcd_write(LCD_DATA, ASCII[character - 0x20][index]);
+    lcd_send_data(LCD_DATA, ASCII[character - 0x20][index]);
     //0x20 is the ASCII character for Space (' '). The font table starts with this character
 
-  lcd_write(LCD_DATA, 0x00); //Blank vertical line padding
+  lcd_send_data(LCD_DATA, 0x00); //Blank vertical line padding
 }
 
 //Given a string of characters, one by one is passed to the LCD
-void lcd_string(char *characters) {
+void lcd_print_characters(char *characters) {
   while (*characters)
-    lcd_character(*characters++);
+    lcd_print_character(*characters++);
+}
+
+void lcd_print_characters(const __FlashStringHelper* ifsh)
+{
+  PGM_P p = reinterpret_cast<PGM_P>(ifsh);
+  while(1)
+  {
+    char c = pgm_read_byte(p++);
+    if( c == '\0' ) break;
+    lcd_print_character(c);
+  }
+}
+
+void lcd_print_string(String string)
+{
+  int string_length = string.length();
+  char char_buffer[string_length];
+  string.toCharArray(char_buffer, string_length);
+  lcd_print_characters(char_buffer);
 }
 
 //Clears the LCD by writing zeros to the entire screen
-void lcd_clear(void) {
+void lcd_clear_screen(void) {
   for (int index = 0 ; index < (LCD_X * LCD_Y / 8) ; index++)
-    lcd_write(LCD_DATA, 0x00);
+    lcd_send_data(LCD_DATA, 0x00);
     
   lcd_go_to_x_y(0, 0); //After we clear the display, return to the home position
 }
 
 //This sends the magical commands to the PCD8544
-void lcd_init(void) {
+void lcd_inititialize(void) {
 
   //Configure control pins
   pinMode(LCD_PIN_SCE, OUTPUT);
@@ -551,21 +696,21 @@ void lcd_init(void) {
   digitalWrite(LCD_PIN_RESET, LOW);
   digitalWrite(LCD_PIN_RESET, HIGH);
 
-  lcd_write(LCD_COMMAND, 0x21); //Tell LCD that extended commands follow
-  lcd_write(LCD_COMMAND, 0xB0); //Set LCD Vop (Contrast): Try 0xB1(good @ 3.3V) or 0xBF if your display is too dark
-  lcd_write(LCD_COMMAND, 0x04); //Set Temp coefficent
-  lcd_write(LCD_COMMAND, 0x14); //LCD bias mode 1:48: Try 0x13 or 0x14
+  lcd_send_data(LCD_COMMAND, 0x21); //Tell LCD that extended commands follow
+  lcd_send_data(LCD_COMMAND, 0xB0); //Set LCD Vop (Contrast): Try 0xB1(good @ 3.3V) or 0xBF if your display is too dark
+  lcd_send_data(LCD_COMMAND, 0x04); //Set Temp coefficent
+  lcd_send_data(LCD_COMMAND, 0x14); //LCD bias mode 1:48: Try 0x13 or 0x14
 
-  lcd_write(LCD_COMMAND, 0x20); //We must send 0x20 before modifying the display control mode
-  lcd_write(LCD_COMMAND, 0x0C); //Set display control, normal mode. 0x0D for inverse
+  lcd_send_data(LCD_COMMAND, 0x20); //We must send 0x20 before modifying the display control mode
+  lcd_send_data(LCD_COMMAND, 0x0C); //Set display control, normal mode. 0x0D for inverse
 }
 
 //There are two memory banks in the LCD, data/RAM and commands. This 
 //function sets the DC pin high or low depending, and then sends
 //the data byte
-void lcd_write(byte data_or_command, byte data) {
+void lcd_send_data(byte data_or_command, byte data) {
   digitalWrite(LCD_PIN_DC, data_or_command); //Tell the LCD that we are writing either to data or a command
-
+  
   //Send the data
   digitalWrite(LCD_PIN_SCE, LOW);
   shiftOut(LCD_PIN_SDIN, LCD_PIN_SCLK, MSBFIRST, data);
