@@ -341,7 +341,7 @@ void process_letter(char meta_value, char key)
   nrf24l01_total_characters_received++;
   if(mode == MODE_STATUS)
   {
-    lcd_go_to_x_y(49,2);
+    lcd_go_to_x_y(49, 4);
     String characters_received_string = String(nrf24l01_total_characters_received);
     lcd_print_string(characters_received_string);
   }
@@ -431,7 +431,12 @@ void display_scanning_channel_on_lcd()
 void display_update_scanning_channel_on_lcd(uint8_t channel)
 {
   lcd_go_to_x_y(42, 3);
-  lcd_print_string(String(nrf24l01_channel));
+  String channel_string = String(nrf24l01_channel);
+  if(channel < 10)
+  {
+    channel_string = "0" + channel_string;
+  }
+  lcd_print_string(channel_string);
 }
 
 void display_setup_status_screen_static_text()
@@ -442,7 +447,7 @@ void display_setup_status_screen_static_text()
   for(int i = 0; i < 5; i++)
   {
     mac_address_position = mac_address_position - 14;  
-    lcd_go_to_x_y(mac_address_position, 1);
+    lcd_go_to_x_y(mac_address_position, 0);
     uint8_t partial_address_value = keyboard_mac_address >> (i * 8);
     lcd_print_string(String(partial_address_value, HEX));
   }
@@ -452,8 +457,14 @@ void display_setup_status_screen_static_text()
   lcd_print_string(String(nrf24l01_channel));
   lcd_go_to_x_y(14, 3);
   lcd_print_characters(F("PKT:"));
+  lcd_go_to_x_y(49,3);
+  String packets_received_string = String(nrf24l01_total_packets_received);
+  lcd_print_string(packets_received_string);
   lcd_go_to_x_y(7, 4);
   lcd_print_characters(F("CHAR:"));
+  lcd_go_to_x_y(49, 4);
+  String characters_received_string = String(nrf24l01_total_characters_received);
+  lcd_print_string(characters_received_string);
 }
 
 void redraw_all_buffered_characters_to_screen()
@@ -515,14 +526,13 @@ void scan_for_keyboards()
   nrf24l01_radio.startListening();
   unsigned long channel_start_scan_time;
   display_scanning_channel_on_lcd();
+  uint8_t common_channels[] = {21, 25, 72};
+  uint8_t common_channel_index = 0;
+  boolean iterating_through_common_channels = true;
+  nrf24l01_channel = common_channels[0];
   
   while (1)
   {
-    if (nrf24l01_channel > 80)
-    {
-      nrf24l01_channel = 3;
-    }
-      
     #ifdef DEBUG
     Serial.println("");
     Serial.print(F("Scanning channel "));
@@ -533,12 +543,12 @@ void scan_for_keyboards()
     display_update_scanning_channel_on_lcd(nrf24l01_channel);
     
     channel_start_scan_time = millis();
-    while (millis() - channel_start_scan_time < 1000)
+    while (millis() - channel_start_scan_time < 500)
     {      
       if(nrf24l01_radio.available())
       {
         nrf24l01_radio.read(&packet, RADIO_PACKET_SIZE);
-        
+          
         if (packet[4] == 0xCD)
         {
           #ifdef DEBUG
@@ -584,7 +594,26 @@ void scan_for_keyboards()
         }
       }
     }
+    
     nrf24l01_channel++;
+    common_channel_index++;
+    
+    if(iterating_through_common_channels == true)
+    {
+      if(common_channel_index == sizeof(common_channels))
+      {
+        iterating_through_common_channels = false;
+        nrf24l01_channel = 3;
+      }
+    }
+    else
+    {
+      if (nrf24l01_channel > 80)
+      {
+        iterating_through_common_channels = true;
+        common_channel_index = 0;
+      }
+    }
   }
 }
 
@@ -599,9 +628,10 @@ void nrf24l01_initialize()
   nrf24l01_radio.setChannel(nrf24l01_channel);
 }
 
-void nrf24l01_setup_for_reading_keyboard()
+void setup_for_reading_keyboard()
 {
   nrf24l01_radio.stopListening();
+  lcd_clear_screen();
   mode = MODE_READING;
   nrf24l01_radio.enableDynamicPayloads();
   nrf24l01_radio.setCRCLength(RF24_CRC_16);
@@ -612,8 +642,9 @@ void nrf24l01_setup_for_reading_keyboard()
 void display_introduction_on_lcd()
 {
   mode = MODE_INTRODUCTION;
+  lcd_clear_screen();
   unsigned int startMillis = millis();
-  while(((millis() - startMillis) <= 3000) && mode == MODE_INTRODUCTION) 
+  while(((millis() - startMillis) <= 5000) && mode == MODE_INTRODUCTION) 
   {
     lcd_go_to_x_y(0, 0);
     lcd_print_characters(F("MS KB READER"));
@@ -640,14 +671,15 @@ void sd_initialize()
 void setup()
 {
   Serial.begin(SERIAL_BAUDRATE);
-  sd_initialize();
+  pinMode(10, OUTPUT);
+  //sd_initialize();
   lcd_inititialize();
   nrf24l01_initialize();
   digitalWrite(2, HIGH); 
   attachInterrupt(0, mode_button_pressed_isr, FALLING);
   display_introduction_on_lcd();
   scan_for_keyboards();
-  nrf24l01_setup_for_reading_keyboard();
+  setup_for_reading_keyboard();
 }
 
 void mode_button_pressed_isr()
@@ -732,9 +764,8 @@ void lcd_print_characters(const __FlashStringHelper* ifsh)
 void lcd_print_string(String string)
 {
   int string_length = string.length();
-  char char_buffer[string_length];
-  string.toCharArray(char_buffer, string_length);
-  lcd_print_characters(char_buffer);
+  for(char i = 0; i < string_length; i++)
+    lcd_print_character(string[i]);
 }
 
 //Clears the LCD by writing zeros to the entire screen
