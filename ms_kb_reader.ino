@@ -1,12 +1,10 @@
 #include <avr/pgmspace.h>
 #include <EEPROM.h>
-#include <SD.h>
 #include <SPI.h>
 #include "nRF24L01.h"
 #include "RF24.h"
 
 #define DEBUG
-#define SD_PIN_CS 8
 #define NRF24L01_RADIO_PIN_CE 9
 #define NRF24L01_RADIO_PIN_CSN 10
 #define LCD_PIN_SCE   7 
@@ -252,8 +250,6 @@ char lcd_display_character_buffer[CHARACTER_BUFFER_NUMBER_OF_LINES][CHARACTER_BU
 uint8_t lcd_display_character_buffer_current_line = 1;
 uint8_t lcd_display_character_buffer_current_character_position = 1;
 
-File sd_card_text_file;
-
 uint8_t decode_hid_data(uint8_t hid, uint8_t meta)
 {
   if(hid >= sizeof(HID_basic)/2)
@@ -356,10 +352,8 @@ void process_letter(char meta_value, char key)
   Serial.print(")");
   #endif
   
-  // If we have reached the end of the current line then save the line to the SD card.
   if(lcd_display_character_buffer_current_character_position == CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE)
   {
-    save_current_line_to_sd_card();
     // If we are on the last line then shift all lines up by one
     if(lcd_display_character_buffer_current_line == CHARACTER_BUFFER_NUMBER_OF_LINES)
     {
@@ -389,32 +383,6 @@ void process_letter(char meta_value, char key)
   }
   
   lcd_display_character_buffer_current_character_position++;
-}
-
-void save_current_line_to_sd_card()
-{
-  sd_card_text_file = SD.open("ms_kb_reader.txt", FILE_WRITE);
-  #ifdef DEBUG
-  if (!sd_card_text_file) 
-  {
-    Serial.println(F("Failed to open SD."));
-  }
-  else
-  {
-    Serial.println(F("Saving line to SD card: "));    
-  }
-  #endif
-  for(int i = 0; i < CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE; i++) 
-  {
-    char character_to_save = lcd_display_character_buffer[lcd_display_character_buffer_current_line - 1][i];
-    if (sd_card_text_file) {
-      sd_card_text_file.print(character_to_save);
-      #ifdef DEBUG
-      Serial.println(character_to_save);
-      #endif
-    }
-  }
-  sd_card_text_file.close();
 }
 
 void display_scanning_channel_on_lcd()
@@ -659,20 +627,9 @@ void display_introduction_on_lcd()
   }
 }
 
-void sd_initialize()
-{
-  if (!SD.begin(SD_PIN_CS)) {
-    #ifdef DEBUG
-    Serial.println(F("SD card initialization failed."));
-    #endif
-  }
-}
-
 void setup()
 {
   Serial.begin(SERIAL_BAUDRATE);
-  pinMode(10, OUTPUT);
-  //sd_initialize();
   lcd_inititialize();
   nrf24l01_initialize();
   digitalWrite(2, HIGH); 
