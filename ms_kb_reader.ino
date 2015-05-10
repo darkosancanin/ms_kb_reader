@@ -352,14 +352,17 @@ void process_letter(char meta_value, char key)
   Serial.print(")");
   #endif
   
-  if(lcd_display_character_buffer_current_character_position == CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE)
+  if(lcd_display_character_buffer_current_character_position > CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE)
   {
     // If we are on the last line then shift all lines up by one
     if(lcd_display_character_buffer_current_line == CHARACTER_BUFFER_NUMBER_OF_LINES)
     {
       for(int i = 0; i < CHARACTER_BUFFER_NUMBER_OF_LINES - 1; i++)
       {
-         strcpy(lcd_display_character_buffer[i], lcd_display_character_buffer[i + 1]); 
+        for(int y = 0; y < CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE - 1; y++)
+        {
+           lcd_display_character_buffer[i][y] = lcd_display_character_buffer[i + 1][y]; 
+        }
       }
       strcpy(lcd_display_character_buffer[CHARACTER_BUFFER_NUMBER_OF_LINES - 1], "            ");
       redraw_all_buffered_characters_to_screen();
@@ -573,6 +576,10 @@ void scan_for_keyboards()
         iterating_through_common_channels = false;
         nrf24l01_channel = 3;
       }
+      else
+      {
+        nrf24l01_channel =  common_channels[common_channel_index];
+      }
     }
     else
     {
@@ -690,7 +697,7 @@ void lcd_bitmap(char my_array[]){
 //Each character is 8 bits tall and 5 bits wide. We pad one blank column of
 //pixels on each side of the character for readability.
 void lcd_print_character(char character) {
-  if(character < 0x20 || character > 0x7f) character = 0x3f;
+  if(character < 0x20 || character > 0x7f) character = 0x20;
   
   lcd_send_data(0x00); //Blank vertical line padding
 
