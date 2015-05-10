@@ -365,7 +365,10 @@ void process_letter(char meta_value, char key)
         }
       }
       strcpy(lcd_display_character_buffer[CHARACTER_BUFFER_NUMBER_OF_LINES - 1], "            ");
-      redraw_all_buffered_characters_to_screen();
+      if(mode == MODE_READING)
+      {
+        redraw_all_buffered_characters_to_screen();
+      }
     }
     else
     {
