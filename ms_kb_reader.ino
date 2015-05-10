@@ -236,6 +236,7 @@ uint8_t HID_basic[][2] = {
 };
 
 volatile char mode = MODE_INTRODUCTION;
+volatile unsigned long mode_button_last_pressed_time = 0; 
 
 uint8_t nrf24l01_channel = 72; 
 uint64_t keyboard_mac_address = 0;
@@ -423,7 +424,9 @@ void display_setup_status_screen_static_text()
     mac_address_position = mac_address_position - 14;  
     lcd_go_to_x_y(mac_address_position, 0);
     uint8_t partial_address_value = keyboard_mac_address >> (i * 8);
-    lcd_print_string(String(partial_address_value, HEX));
+    String value_string = String(partial_address_value, HEX);
+    value_string.toUpperCase();
+    lcd_print_string(value_string);
   }
   lcd_go_to_x_y(7, 2);
   lcd_print_characters(F("CHAN: 24"));
@@ -500,7 +503,7 @@ void scan_for_keyboards()
   nrf24l01_radio.startListening();
   unsigned long channel_start_scan_time;
   display_scanning_channel_on_lcd();
-  uint8_t common_channels[] = {21, 25, 72};
+  uint8_t common_channels[] = {21, 25, 54, 72};
   uint8_t common_channel_index = 0;
   boolean iterating_through_common_channels = true;
   nrf24l01_channel = common_channels[0];
@@ -651,19 +654,24 @@ void setup()
 
 void mode_button_pressed_isr()
 {
-  if(mode == MODE_READING)
-  {
-    mode = MODE_STATUS;
-    display_setup_status_screen_static_text();
-  }
-  else if(mode == MODE_STATUS)
-  {
-    mode = MODE_READING;
-    redraw_all_buffered_characters_to_screen();
-  }
-  else if(mode == MODE_INTRODUCTION)
-  {
-    mode = MODE_SCANNING;
+  unsigned long current_millis = millis();
+  // Ignore the button press if its with the debounce delay time (120ms) from its last press
+  if ((current_millis - mode_button_last_pressed_time) > 120) {
+    if(mode == MODE_READING)
+    {
+      mode = MODE_STATUS;
+      display_setup_status_screen_static_text();
+    }
+    else if(mode == MODE_STATUS)
+    {
+      mode = MODE_READING;
+      redraw_all_buffered_characters_to_screen();
+    }
+    else if(mode == MODE_INTRODUCTION)
+    {
+      mode = MODE_SCANNING;
+    }
+    mode_button_last_pressed_time = millis();
   }
 }
 
