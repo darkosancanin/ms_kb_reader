@@ -775,7 +775,7 @@ void lcd_inititialize(void) {
   digitalWrite(LCD_PIN_RESET, HIGH);
 
   lcd_send_command(0x21); //Tell LCD that extended commands follow
-  lcd_send_command(0xB0); //Set LCD Vop (Contrast): Try 0xB1(good @ 3.3V) or 0xBF if your display is too dark
+  lcd_send_command(0xBF); //Set LCD Vop (Contrast): Try 0xB1(good @ 3.3V) or 0xBF if your display is too dark
   lcd_send_command(0x04); //Set Temp coefficent
   lcd_send_command(0x14); //LCD bias mode 1:48: Try 0x13 or 0x14
 
