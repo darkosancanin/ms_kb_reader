@@ -362,7 +362,7 @@ void process_letter(char meta_value, char key)
       {
         for(int y = 0; y < CHARACTER_BUFFER_NUMBER_OF_CHARACTERS_PER_LINE - 1; y++)
         {
-           lcd_display_character_buffer[i][y] = lcd_display_character_buffer[i + 1][y]; 
+          lcd_display_character_buffer[i][y] = lcd_display_character_buffer[i + 1][y]; 
         }
       }
       strcpy(lcd_display_character_buffer[CHARACTER_BUFFER_NUMBER_OF_LINES - 1], "            ");
@@ -503,9 +503,10 @@ void scan_for_keyboards()
   nrf24l01_radio.startListening();
   unsigned long channel_start_scan_time;
   display_scanning_channel_on_lcd();
-  uint8_t common_channels[] = {21, 25, 54, 72};
+  uint8_t common_channels[] = {21, 25, 54, 72}; // List of common channels (from experience) that the keyboards are tuned to. Will scan those channels multiple times first.
   uint8_t common_channel_index = 0;
-  boolean iterating_through_common_channels = true;
+  uint8_t common_channel_iteration_count = 0;
+  boolean iterating_through_common_channels = true; // Start by iterating common channels first.
   nrf24l01_channel = common_channels[0];
   
   while (1)
@@ -572,15 +573,21 @@ void scan_for_keyboards()
       }
     }
     
-    nrf24l01_channel++;
-    common_channel_index++;
-    
     if(iterating_through_common_channels == true)
     {
+	  common_channel_index++;
       if(common_channel_index == sizeof(common_channels))
       {
-        iterating_through_common_channels = false;
-        nrf24l01_channel = 3;
+        if(common_channel_iteration_count == 5) // Try the common channels 5 times before trying every channel.
+		{
+		  iterating_through_common_channels = false;
+          nrf24l01_channel = 3; // Start scanning on channel 3 as this is the lowest channel the keyboards will be on.
+		}
+		else
+		{
+		  common_channel_index = 0;
+		  common_channel_iteration_count++;
+		}
       }
       else
       {
@@ -589,10 +596,12 @@ void scan_for_keyboards()
     }
     else
     {
-      if (nrf24l01_channel > 80)
+	  nrf24l01_channel++;
+      if (nrf24l01_channel > 80) // Stop scanning on channel 80 as this is the highest channel the keyboards will be on.
       {
         iterating_through_common_channels = true;
         common_channel_index = 0;
+		common_channel_iteration_count = 0;
       }
     }
   }
@@ -611,9 +620,9 @@ void nrf24l01_initialize()
 
 void setup_for_reading_keyboard()
 {
+  mode = MODE_READING;
   nrf24l01_radio.stopListening();
   lcd_clear_screen();
-  mode = MODE_READING;
   nrf24l01_radio.enableDynamicPayloads();
   nrf24l01_radio.setCRCLength(RF24_CRC_16);
   nrf24l01_radio.openReadingPipe(1, keyboard_mac_address);
