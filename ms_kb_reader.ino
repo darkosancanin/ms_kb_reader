@@ -575,33 +575,34 @@ void scan_for_keyboards()
     
     if(iterating_through_common_channels == true)
     {
-	  common_channel_index++;
+      common_channel_index++;
       if(common_channel_index == sizeof(common_channels))
       {
         if(common_channel_iteration_count == 5) // Try the common channels 5 times before trying every channel.
-		{
-		  iterating_through_common_channels = false;
+	{
+          iterating_through_common_channels = false;
           nrf24l01_channel = 3; // Start scanning on channel 3 as this is the lowest channel the keyboards will be on.
-		}
-		else
-		{
-		  common_channel_index = 0;
-		  common_channel_iteration_count++;
-		}
+	}
+	else
+        {
+          common_channel_index = 0;
+          nrf24l01_channel = common_channels[0];
+          common_channel_iteration_count++;
+        }
       }
       else
       {
-        nrf24l01_channel =  common_channels[common_channel_index];
+        nrf24l01_channel = common_channels[common_channel_index];
       }
     }
     else
     {
-	  nrf24l01_channel++;
+      nrf24l01_channel++;
       if (nrf24l01_channel > 80) // Stop scanning on channel 80 as this is the highest channel the keyboards will be on.
       {
         iterating_through_common_channels = true;
         common_channel_index = 0;
-		common_channel_iteration_count = 0;
+        common_channel_iteration_count = 0;
       }
     }
   }
