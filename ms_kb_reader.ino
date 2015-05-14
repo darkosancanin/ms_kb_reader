@@ -7,11 +7,11 @@
 #define DEBUG
 #define NRF24L01_RADIO_PIN_CE 9
 #define NRF24L01_RADIO_PIN_CSN 10
-#define LCD_PIN_SCE   7 
-#define LCD_PIN_RESET 6
+#define LCD_PIN_RESET 3
+#define LCD_PIN_SCE   4 
 #define LCD_PIN_DC    5
-#define LCD_PIN_SDIN  4
-#define LCD_PIN_SCLK  3
+#define LCD_PIN_SDIN  6
+#define LCD_PIN_SCLK  7
 #define LCD_X     84
 #define LCD_Y     48
 #define LCD_CHARACTER_WIDTH 7 // Includes 1 line padding on either side
